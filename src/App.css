@@ -1,0 +1,79 @@
+
+
+/* Full page container */
+.app-container {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
+}
+
+/* Sidebar */
+.sidebar {
+  background-color: #fff;
+  box-shadow: 2px 0 5px rgba(0,0,0,0.1);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  transition: width 0.3s;
+  overflow: hidden;
+}
+
+.sidebar.open {
+  width: 250px;
+}
+
+.sidebar.collapsed {
+  width: 60px;
+}
+
+/* Sidebar buttons */
+.sidebar-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.sidebar button {
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid #888;
+  cursor: pointer;
+}
+
+/* Toggle button */
+.toggle-btn {
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid #555;
+  cursor: pointer;
+}
+
+/* Map area */
+.map-area {
+  flex: 1;
+  background-color: #eee;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Map placeholder card */
+.map-placeholder {
+  background-color: #fff;
+  padding: 40px;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+  border-radius: 20px;
+  text-align: center;
+}
+
+.map-placeholder .title {
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.map-placeholder .subtitle {
+  font-size: 14px;
+  color: #666;
+  margin-top: 8px;
+}
