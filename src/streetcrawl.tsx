@@ -12,23 +12,39 @@ export default function Streetcrawl({ onExit }: StreetcrawlProps) {
     const markerRef = useRef<google.maps.Marker | null>(null);
     const initializedRef = useRef(false);
 
+    const streetViewRequestInFlight = useRef(false);
     const enterStreetView = () => {
+        // prevent spamming Street View requests
+        if (streetViewRequestInFlight.current) return;
+        streetViewRequestInFlight.current = true;
+
         const map = mapRef.current;
         const marker = markerRef.current;
 
-        if (!map || !marker) return;
-        if (!(window.google && window.google.maps)) return;
+        if (!map || !marker || !(window.google && window.google.maps)) {
+            streetViewRequestInFlight.current = false;
+            return;
+        }
 
         const targetPos = marker.getPosition();
-        if (!targetPos) return;
+        if (!targetPos) {
+            streetViewRequestInFlight.current = false;
+            return;
+        }
 
         const streetViewService = new window.google.maps.StreetViewService();
 
         streetViewService.getPanorama(
             { location: targetPos, radius: 100 },
-            (data: google.maps.StreetViewPanoramaData | null, status: google.maps.StreetViewStatus) => {
+            (
+                data: google.maps.StreetViewPanoramaData | null,
+                status: google.maps.StreetViewStatus
+            ) => {
+                // unlock when request completes
+                streetViewRequestInFlight.current = false;
+
                 if (status !== google.maps.StreetViewStatus.OK || !data?.location?.pano) {
-                    console.warn("No Street View available near marker");
+                    console.warn("No Street View available near marker", status);
                     return;
                 }
 
@@ -44,15 +60,12 @@ export default function Streetcrawl({ onExit }: StreetcrawlProps) {
                 });
 
                 panorama.setPano(data.location.pano);
-                panorama.setPov({
-                    heading: 0, 
-                    pitch: 0,
-                });
-
+                panorama.setPov({ heading: 0, pitch: 0 });
                 panorama.setVisible(true);
             }
         );
     };
+
 
     const handleExit = () => {
         onExit?.();
@@ -64,6 +77,7 @@ export default function Streetcrawl({ onExit }: StreetcrawlProps) {
         const existingScript = document.querySelector(
             'script[src*="maps.googleapis.com/maps/api/js"]'
         );
+
 
         const initializeMap = () => {
             if (initializedRef.current) return;
