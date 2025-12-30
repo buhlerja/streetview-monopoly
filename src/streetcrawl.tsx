@@ -12,60 +12,40 @@ export default function Streetcrawl({ onExit }: StreetcrawlProps) {
     const markerRef = useRef<google.maps.Marker | null>(null);
     const initializedRef = useRef(false);
 
-    const streetViewRequestInFlight = useRef(false);
-    const enterStreetView = () => {
-        // prevent spamming Street View requests
-        if (streetViewRequestInFlight.current) return;
-        streetViewRequestInFlight.current = true;
+    const panoramaRef = useRef<google.maps.StreetViewPanorama | null>(null);
 
+    const enterStreetView = (): void => {
         const map = mapRef.current;
         const marker = markerRef.current;
 
-        if (!map || !marker || !(window.google && window.google.maps)) {
-            streetViewRequestInFlight.current = false;
-            return;
-        }
+        if (!map || !marker || !window.google?.maps) return;
 
-        const targetPos = marker.getPosition();
-        if (!targetPos) {
-            streetViewRequestInFlight.current = false;
-            return;
-        }
+        const position = marker.getPosition();
+        if (!position) return;
 
-        const streetViewService = new window.google.maps.StreetViewService();
-
-        streetViewService.getPanorama(
-            { location: targetPos, radius: 100 },
-            (
-                data: google.maps.StreetViewPanoramaData | null,
-                status: google.maps.StreetViewStatus
-            ) => {
-                // unlock when request completes
-                streetViewRequestInFlight.current = false;
-
-                if (status !== google.maps.StreetViewStatus.OK || !data?.location?.pano) {
-                    console.warn("No Street View available near marker", status);
-                    return;
-                }
-
-                const panorama = map.getStreetView();
-
-                panorama.setOptions({
-                    clickToGo: true,
-                    linksControl: true,
-                    panControl: true,
-                    zoomControl: true,
-                    addressControl: false,
-                    fullscreenControl: false,
-                });
-
-                panorama.setPano(data.location.pano);
-                panorama.setPov({ heading: 0, pitch: 0 });
-                panorama.setVisible(true);
+        // Create panorama ONCE
+        if (!panoramaRef.current) {
+            panoramaRef.current = new google.maps.StreetViewPanorama(
+            map.getDiv(),
+            {
+                pov: { heading: 0, pitch: 0 },
+                visible: false,
+                clickToGo: true,     // <-- enables moving
+                linksControl: true,  // <-- shows arrows
+                panControl: true,
+                zoomControl: true,
+                addressControl: false,
+                fullscreenControl: false,
             }
-        );
-    };
+            );
 
+            map.setStreetView(panoramaRef.current);
+        }
+
+        // Enter Street View at marker location
+        panoramaRef.current.setPosition(position);
+        panoramaRef.current.setVisible(true);
+    };
 
     const handleExit = () => {
         onExit?.();
@@ -95,10 +75,16 @@ export default function Streetcrawl({ onExit }: StreetcrawlProps) {
                 fullscreenControl: false,
             });
 
-            const marker = new window.google.maps.Marker({
+            /*const marker = new window.google.maps.Marker({
                 position: bloorAndYonge,
                 map,
                 title: "Bloor & Yonge",
+            });*/
+
+            const marker = new window.google.maps.Marker({
+                position: { lat: 37.7749, lng: -122.4194 },
+                map,
+                title: "San Francisco",
             });
 
             mapRef.current = map;
