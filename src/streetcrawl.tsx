@@ -12,6 +12,9 @@ export default function Streetcrawl({ onExit }: StreetcrawlProps) {
     const markerRef = useRef<google.maps.Marker | null>(null);
     const initializedRef = useRef(false);
 
+    // State to store the path a user takes in Street View
+    const streetViewPath = useRef<google.maps.LatLngLiteral[]>([]);
+
     const panoramaRef = useRef<google.maps.StreetViewPanorama | null>(null);
 
     const enterStreetView = (): void => {
@@ -42,6 +45,14 @@ export default function Streetcrawl({ onExit }: StreetcrawlProps) {
             map.setStreetView(panoramaRef.current);
         }
 
+        // Track user movement while in streetview
+        panoramaRef.current.addListener("position_changed", () => {
+            const newPos = panoramaRef.current!.getPosition();
+            if (newPos) {
+                streetViewPath.current.push({ lat: newPos.lat(), lng: newPos.lng() });
+            }
+        });
+
         // Enter Street View at marker location
         panoramaRef.current.setPosition(position);
         panoramaRef.current.setVisible(true);
@@ -50,6 +61,25 @@ export default function Streetcrawl({ onExit }: StreetcrawlProps) {
     const handleExit = () => {
         onExit?.();
     };
+
+    const handleStreetViewClose = () => {
+        const map = mapRef.current;
+        if (!map || !panoramaRef.current) return;
+
+        panoramaRef.current.setVisible(false);
+
+        // Draw the path on the map
+        new google.maps.Polyline({
+            map,
+            path: streetViewPath.current,
+            strokeColor: "#FF0000",
+            strokeOpacity: 0.8,
+            strokeWeight: 4,
+        });
+
+        // Clear the path for next session
+        // streetViewPath.current = [];
+    }
 
     useEffect(() => {
         const apiKey = import.meta.env.VITE_API_KEY;
@@ -82,9 +112,9 @@ export default function Streetcrawl({ onExit }: StreetcrawlProps) {
             });*/
 
             const marker = new window.google.maps.Marker({
-                position: { lat: 37.7749, lng: -122.4194 },
+                position: { lat: 43.6603, lng: -79.3839 },
                 map,
-                title: "San Francisco",
+                title: "Yonge and College",
             });
 
             mapRef.current = map;
@@ -132,8 +162,9 @@ export default function Streetcrawl({ onExit }: StreetcrawlProps) {
             <div className="sidebar-buttons">
                 <button>Roll Dice</button>
                 <button>Buy Property</button>
-                <button type="button" onClick={handleExit}>Exit</button>
+                <button type="button" onClick={handleExit}>Main Menu</button>
                 <button type="button" onClick={enterStreetView}>Enter Street View</button>
+                <button type="button" onClick={handleStreetViewClose}>Exit Street View</button>
             </div>
             )}
         </div>
