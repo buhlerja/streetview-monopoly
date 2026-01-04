@@ -1,3 +1,16 @@
+# macOS
+.DS_Store
+
+# Logs
+*.log
+
+# Node modules (affects all subprojects)
+node_modules/
+
+# Build outputs
+/dist
+/build
+
 # Logs
 logs
 *.log
@@ -23,4 +36,5 @@ dist-ssr
 *.sln
 *.sw?
 
-.env*
+# Env files
+.env
