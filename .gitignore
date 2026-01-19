@@ -37,4 +37,6 @@ dist-ssr
 *.sw?
 
 # Env files
-.env
+.env*
+.env.local
+.env.*.local
