@@ -3,9 +3,10 @@ import "./App.css";
 
 type StreetcrawlProps = {
   onExit?: () => void;
+  gameCode: string;
 };
 
-export default function Streetcrawl({ onExit }: StreetcrawlProps) {
+export default function Streetcrawl({ onExit, gameCode }: StreetcrawlProps) {
     const [sidebarOpen, setSidebarOpen] = useState(true);
 
     const mapRef = useRef<google.maps.Map | null>(null);
@@ -167,6 +168,7 @@ export default function Streetcrawl({ onExit }: StreetcrawlProps) {
 
             {sidebarOpen && (
             <div className="sidebar-buttons">
+                <h2>Game Code: {gameCode}</h2>
                 <button>Roll Dice</button>
                 <button>Buy Property</button>
                 <button type="button" onClick={handleExit}>Main Menu</button>
