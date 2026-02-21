@@ -15,10 +15,18 @@ const io = new Server(httpServer, {
   }
 });
 
-// Keep track of active games and their players
+interface LatLngPoint {
+  lat: number;
+  lng: number;
+}
+
+export type GamePaths = Record<string, LatLngPoint[]>;
+
+// Keep track of active games and their players/paths in memory
 interface Game {
   code: string;
-  players: string[]; // socket ids
+  players: string[]; 
+  paths: GamePaths; 
 }
 
 const games: Record<string, Game> = {};
@@ -29,8 +37,7 @@ io.on("connection", (socket) => {
   // Client wants to create a new game
   socket.on("createGame", (callback: (code: string) => void) => {
     const code = generateGameCode();
-    games[code] = { code, players: [socket.id] };
-
+    games[code] = { code, players: [socket.id], paths: {} };
     socket.join(code); // socket joins the room named by the code
     console.log(`Game created: ${code} by ${socket.id}`);
 
@@ -62,10 +69,45 @@ io.on("connection", (socket) => {
     }
   );
 
-  // Handle game moves/events
-  socket.on("gameAction", (data: any) => {
-    const { gameCode, action } = data;
-    io.to(gameCode).emit("gameAction", action); // broadcast to room
+  socket.on("updatePath", ({ gameCode, pathPoint }) => {
+    if (!games[gameCode]) return;
+
+    games[gameCode].paths ??= {};
+    games[gameCode].paths[socket.id] ??= [];
+    games[gameCode].paths[socket.id].push({
+      lat: pathPoint.lat,
+      lng: pathPoint.lng,
+    });
+
+    io.to(gameCode).emit(
+      "gamePathsUpdate",
+      games[gameCode].paths // Broadcast to room (gameCode)
+    );
+  });
+
+  socket.on("leaveGameRoom", (gameCode: string) => {
+    const game = games[gameCode];
+    if (!game) return;
+
+    // Remove player from socket room
+    socket.leave(gameCode);
+
+    // Remove player from game state
+    if (game.players) {
+      game.players = game.players.filter(
+        player => player !== socket.id
+      );
+    }
+
+    // Remove path data
+    if (game.paths) {
+      delete game.paths[socket.id];
+    }
+
+    // Notify remaining players
+    io.to(gameCode).emit("gamePathsUpdate", game.paths);
+
+    console.log(`Player ${socket.id} left game ${gameCode}`);
   });
 
   // Disconnect handling

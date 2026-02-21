@@ -1,20 +1,30 @@
 import { useState, useEffect, useRef } from "react";
+import { Socket } from "socket.io-client";
 import "./App.css";
 
 type StreetcrawlProps = {
-  onExit?: () => void;
   gameCode: string;
+  socket?: Socket | null;
+  onExit?: () => void;
 };
 
-export default function Streetcrawl({ onExit, gameCode }: StreetcrawlProps) {
+interface LatLngPoint {
+  lat: number;
+  lng: number;
+}
+
+export type GamePaths = Record<string, LatLngPoint[]>;
+
+export default function Streetcrawl({ gameCode, socket, onExit }: StreetcrawlProps) {
     const [sidebarOpen, setSidebarOpen] = useState(true);
+    const [allPaths, setAllPaths] = useState<Record<string, google.maps.LatLngLiteral[]>>({});
 
     const mapRef = useRef<google.maps.Map | null>(null);
     const markerRef = useRef<google.maps.Marker | null>(null);
     const initializedRef = useRef(false);
 
     // State to store the path a user takes in Street View
-    const streetViewPath = useRef<google.maps.LatLngLiteral[]>([]);
+    //const streetViewPath = useRef<google.maps.LatLngLiteral[]>([]);
 
     const panoramaRef = useRef<google.maps.StreetViewPanorama | null>(null);
 
@@ -47,10 +57,23 @@ export default function Streetcrawl({ onExit, gameCode }: StreetcrawlProps) {
         }
 
         // Track user movement while in streetview
+        let lastUpdate = 0;
         panoramaRef.current.addListener("position_changed", () => {
+             const now = Date.now();
+            if (now - lastUpdate < 500) return; // send every 500ms
+            lastUpdate = now;
             const newPos = panoramaRef.current!.getPosition();
             if (newPos) {
-                streetViewPath.current.push({ lat: newPos.lat(), lng: newPos.lng() });
+                const pathPoint = { lat: newPos.lat(), lng: newPos.lng() };
+
+                // Add to locally tracked path 
+                //streetViewPath.current.push(pathPoint);
+
+                // Emit path update to server 
+                socket?.emit("updatePath", {
+                    gameCode,
+                    pathPoint
+                });
             }
         });
 
@@ -70,17 +93,50 @@ export default function Streetcrawl({ onExit, gameCode }: StreetcrawlProps) {
         panoramaRef.current.setVisible(false);
 
         // Draw the path on the map
-        new google.maps.Polyline({
+        // Commented out so that we can draw the path sent from the server.
+        // Rather than just our local path, we want to draw everyone's path in real time as they move in street view.
+        /*new google.maps.Polyline({
             map,
             path: streetViewPath.current,
             strokeColor: "#FF0000",
             strokeOpacity: 0.8,
             strokeWeight: 4,
-        });
+        });*/
 
         // Clear the path for next session
         // streetViewPath.current = [];
     }
+
+    // Use effect for drawing path updates from the server
+    // Since we never clear previous polylines performance might degrade. Want to look into a more efficient way
+    useEffect(() => {
+        if (!mapRef.current) return;
+
+        Object.values(allPaths).forEach(path => {
+            new google.maps.Polyline({
+                map: mapRef.current!,
+                path,
+                strokeWeight: 3
+            });
+        });
+    }, [allPaths]);
+
+    // Use effect to listen for global path updates from the server
+    useEffect(() => {
+        if (!socket) return;
+
+        //socket.emit("joinGame", gameCode); // When component mounts, join the specific game room for path updates
+        // Already joined the room in App.tsx, so no need to join again here. Just need to listen for updates.
+
+        socket.on("gamePathsUpdate", (paths: GamePaths) => {
+            setAllPaths(paths);
+        });
+
+        return () => {
+            socket.emit("leaveGameRoom", gameCode);
+            socket.off("gamePathsUpdate");
+        };
+    }, [socket, gameCode]);
 
     useEffect(() => {
         const apiKey = import.meta.env.VITE_API_KEY;
@@ -96,7 +152,7 @@ export default function Streetcrawl({ onExit, gameCode }: StreetcrawlProps) {
             if (!(window.google && window.google.maps)) return;
 
             const uoftCenter = { lat: 43.6629, lng: -79.3957 };
-            const bloorAndYonge = { lat: 43.6706, lng: -79.3865 };
+            //const bloorAndYonge = { lat: 43.6706, lng: -79.3865 };
 
             const mapElement = document.getElementById("map");
 
@@ -127,7 +183,7 @@ export default function Streetcrawl({ onExit, gameCode }: StreetcrawlProps) {
 
             mapRef.current = map;
             markerRef.current = marker;
-         };
+        };
 
         if (!existingScript) {
             const script = document.createElement("script");

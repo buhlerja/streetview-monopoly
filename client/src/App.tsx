@@ -1,40 +1,43 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import "./App.css";
 import { io, Socket } from "socket.io-client";
 import Streetcrawl from "./streetcrawl";
 
-let socket: Socket;
+//let socket: Socket;
 
 export default function App() {
   const [screen, setScreen] = useState<"menu" | "new" | "join" | "streetcrawl">(
     "menu"
   );
-
+  const socketRef = useRef<Socket | null>(null);
   const [gameCode, setGameCode] = useState("");
   const [joinCode, setJoinCode] = useState("");
   const [connected, setConnected] = useState(false);
 
   /* ---------------- Connect to server on app boot ---------------- */
   useEffect(() => {
-    socket = io("http://localhost:3001");
+    socketRef.current = io("http://localhost:3001");
+
+    const socket = socketRef.current; // grab the actual socket
 
     socket.on("connect", () => {
-      console.log("Connected to server:", socket.id);
+      console.log("Connected:", socket.id);
       setConnected(true);
     });
 
     socket.on("disconnect", () => {
-      console.log("Disconnected from server");
       setConnected(false);
     });
 
-    // Optional: listen for updates from the server
-    socket.on("playerJoined", (data) => {
+    const handlePlayerJoined = (data: any) => {
       console.log("A player joined your game:", data);
-    });
+    };
+
+    socket.on("playerJoined", handlePlayerJoined); // use socket
 
     return () => {
-      socket.disconnect();
+      socket.off("playerJoined", handlePlayerJoined); // use socket
+      socket.disconnect(); // use socket
     };
   }, []);
 
@@ -42,7 +45,7 @@ export default function App() {
   if (screen === "new") {
     return (
       <div className="menu-screen">
-        <h1>New Game</h1>
+        <h1>New Game Created</h1>
 
         <p>Your game code:</p>
 
@@ -50,7 +53,7 @@ export default function App() {
           {gameCode}
         </div>
 
-        <button 
+        <button
           onClick={() => setScreen("streetcrawl")}
           disabled={!gameCode}
         >
@@ -78,17 +81,23 @@ export default function App() {
         />
 
         <button
-          disabled={!joinCode}
+          disabled={!joinCode || !socketRef.current}
           onClick={() => {
-            // Ask server to join game
-            socket.emit("joinGame", joinCode, (success: boolean, message?: string) => {
-              if (success) {
-                setGameCode(joinCode);
-                setScreen("streetcrawl");
-              } else {
-                alert(message || "Could not join game");
+            const socket = socketRef.current;
+            if (!socket) return;
+
+            socket.emit(
+              "joinGame",
+              joinCode,
+              (success: boolean, message?: string) => {
+                if (success) {
+                  setGameCode(joinCode);
+                  setScreen("streetcrawl");
+                } else {
+                  alert(message || "Could not join game");
+                }
               }
-            });
+            );
           }}
         >
           Join
@@ -106,6 +115,7 @@ export default function App() {
     return (
       <Streetcrawl
         gameCode={gameCode}
+        socket={socketRef.current}
         onExit={() => setScreen("menu")} 
       />
     );
@@ -119,7 +129,9 @@ export default function App() {
       <div className="menu-buttons">
         <button
           onClick={() => {
-            // Ask server to create a new game
+            const socket = socketRef.current;
+            if (!socket) return;
+
             socket.emit("createGame", (code: string) => {
               setGameCode(code);
               setScreen("new");
