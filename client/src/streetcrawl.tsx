@@ -1,20 +1,31 @@
 import { useState, useEffect, useRef } from "react";
+import { Socket } from "socket.io-client";
 import "./App.css";
 import { loadSession, saveSession } from "./storage";
 
 type StreetcrawlProps = {
-    onExit?: () => void;
+  gameCode: string;
+  socket?: Socket | null;
+  onExit?: () => void;
 };
 
-export default function Streetcrawl({ onExit }: StreetcrawlProps) {
+interface LatLngPoint {
+  lat: number;
+  lng: number;
+}
+
+export type GamePaths = Record<string, LatLngPoint[]>;
+
+export default function Streetcrawl({ gameCode, socket, onExit }: StreetcrawlProps) {
     const [sidebarOpen, setSidebarOpen] = useState(true);
+    const [allPaths, setAllPaths] = useState<Record<string, google.maps.LatLngLiteral[]>>({});
 
     const mapRef = useRef<google.maps.Map | null>(null);
     const markerRef = useRef<google.maps.Marker | null>(null);
     const initializedRef = useRef(false);
 
     // State to store the path a user takes in Street View
-    const streetViewPath = useRef<google.maps.LatLngLiteral[]>([]);
+    //const streetViewPath = useRef<google.maps.LatLngLiteral[]>([]);
 
     const panoramaRef = useRef<google.maps.StreetViewPanorama | null>(null);
 
@@ -89,15 +100,48 @@ export default function Streetcrawl({ onExit }: StreetcrawlProps) {
 
         // Draw the path on the map
         if (streetViewPath.current.length > 0) {
-            new google.maps.Polyline({
+            // Commented out so that we can draw the path sent from the server.
+        // Rather than just our local path, we want to draw everyone's path in real time as they move in street view.
+        /*new google.maps.Polyline({
                 map,
                 path: streetViewPath.current,
                 strokeColor: "#FF0000",
                 strokeOpacity: 0.8,
                 strokeWeight: 4,
-            });
+            });*/
         }
     }
+
+    // Use effect for drawing path updates from the server
+    // Since we never clear previous polylines performance might degrade. Want to look into a more efficient way
+    useEffect(() => {
+        if (!mapRef.current) return;
+
+        Object.values(allPaths).forEach(path => {
+            new google.maps.Polyline({
+                map: mapRef.current!,
+                path,
+                strokeWeight: 3
+            });
+        });
+    }, [allPaths]);
+
+    // Use effect to listen for global path updates from the server
+    useEffect(() => {
+        if (!socket) return;
+
+        //socket.emit("joinGame", gameCode); // When component mounts, join the specific game room for path updates
+        // Already joined the room in App.tsx, so no need to join again here. Just need to listen for updates.
+
+        socket.on("gamePathsUpdate", (paths: GamePaths) => {
+            setAllPaths(paths);
+        });
+
+        return () => {
+            socket.emit("leaveGameRoom", gameCode);
+            socket.off("gamePathsUpdate");
+        };
+    }, [socket, gameCode]);
 
     useEffect(() => {
         const apiKey = import.meta.env.VITE_API_KEY;
@@ -113,7 +157,7 @@ export default function Streetcrawl({ onExit }: StreetcrawlProps) {
             if (!(window.google && window.google.maps)) return;
 
             const uoftCenter = { lat: 43.6629, lng: -79.3957 };
-            const bloorAndYonge = { lat: 43.6706, lng: -79.3865 };
+            //const bloorAndYonge = { lat: 43.6706, lng: -79.3865 };
 
             const mapElement = document.getElementById("map");
 
@@ -249,16 +293,17 @@ export default function Streetcrawl({ onExit }: StreetcrawlProps) {
                     {sidebarOpen ? "Collapse" : "Expand"}
                 </button>
 
-                {sidebarOpen && (
-                    <div className="sidebar-buttons">
-                        <button>Roll Dice</button>
-                        <button>Buy Property</button>
-                        <button type="button" onClick={handleExit}>Main Menu</button>
-                        <button type="button" onClick={enterStreetView}>Enter Street View</button>
-                        <button type="button" onClick={handleStreetViewClose}>Exit Street View</button>
-                    </div>
-                )}
+            {sidebarOpen && (
+            <div className="sidebar-buttons">
+                <h2>Game Code: {gameCode}</h2>
+                <button>Roll Dice</button>
+                <button>Buy Property</button>
+                <button type="button" onClick={handleExit}>Main Menu</button>
+                <button type="button" onClick={enterStreetView}>Enter Street View</button>
+                <button type="button" onClick={handleStreetViewClose}>Exit Street View</button>
             </div>
+            )}
+        </div>
 
             <div className="map-area">
                 <div
