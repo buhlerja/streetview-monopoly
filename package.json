@@ -1,0 +1,8 @@
+{
+  "dependencies": {
+    "vite": "^7.3.1"
+  },
+  "devDependencies": {
+    "@types/google.maps": "^3.58.1"
+  }
+}

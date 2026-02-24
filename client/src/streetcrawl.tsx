@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from "react";
 import "./App.css";
+import { loadSession, saveSession } from "./storage";
 
 type StreetcrawlProps = {
-  onExit?: () => void;
+    onExit?: () => void;
 };
 
 export default function Streetcrawl({ onExit }: StreetcrawlProps) {
@@ -21,41 +22,46 @@ export default function Streetcrawl({ onExit }: StreetcrawlProps) {
         const map = mapRef.current;
         const marker = markerRef.current;
 
-        if (!map || !marker || !window.google?.maps) return;
-
-        const position = marker.getPosition();
-        if (!position) return;
-
-        // Create panorama ONCE
-        if (!panoramaRef.current) {
-            panoramaRef.current = new google.maps.StreetViewPanorama(
-            map.getDiv(),
-            {
-                pov: { heading: 0, pitch: 0 },
-                visible: false,
-                clickToGo: true,     // <-- enables moving
-                linksControl: true,  // <-- shows arrows
-                panControl: true,
-                zoomControl: true,
-                addressControl: false,
-                fullscreenControl: false,
-            }
-            );
-
-            map.setStreetView(panoramaRef.current);
+        if (!map || !marker || !window.google?.maps) {
+            console.error("Missing refs:", { map, marker });
+            return;
         }
 
-        // Track user movement while in streetview
-        panoramaRef.current.addListener("position_changed", () => {
-            const newPos = panoramaRef.current!.getPosition();
+        const position = (mapRef as any).lastStreetViewPosition || marker.getPosition();
+
+        if (!position) {
+            console.error("No position found");
+            return;
+        }
+
+        console.log("Entering street view at:", position);
+
+        const panorama = map.getStreetView();
+        panorama.setPosition(position);
+        panorama.setVisible(true);
+
+        // Add position_changed listener to track movement
+        panorama.addListener("position_changed", () => {
+            const newPos = panorama.getPosition();
             if (newPos) {
-                streetViewPath.current.push({ lat: newPos.lat(), lng: newPos.lng() });
+                const latLng = { lat: newPos.lat(), lng: newPos.lng() };
+                streetViewPath.current.push(latLng);
+
+                // Store last position
+                (mapRef as any).lastStreetViewPosition = latLng;
+
+                const center = map.getCenter();
+                saveSession({
+                    center: center ? { lat: center.lat(), lng: center.lng() } : undefined,
+                    zoom: map.getZoom() ?? undefined,
+                    markerPosition: marker.getPosition()
+                        ? { lat: marker.getPosition()!.lat(), lng: marker.getPosition()!.lng() }
+                        : undefined,
+                    streetViewPath: streetViewPath.current,
+                    streetViewPosition: latLng,
+                });
             }
         });
-
-        // Enter Street View at marker location
-        panoramaRef.current.setPosition(position);
-        panoramaRef.current.setVisible(true);
     };
 
     const handleExit = () => {
@@ -64,21 +70,33 @@ export default function Streetcrawl({ onExit }: StreetcrawlProps) {
 
     const handleStreetViewClose = () => {
         const map = mapRef.current;
-        if (!map || !panoramaRef.current) return;
+        const marker = markerRef.current;
+        if (!map || !marker) return;
 
-        panoramaRef.current.setVisible(false);
+        const panorama = map.getStreetView();
+
+        // Save current position before hiding
+        const currentPos = panorama.getPosition();
+        if (currentPos) {
+            const latLng = { lat: currentPos.lat(), lng: currentPos.lng() };
+            (mapRef as any).lastStreetViewPosition = latLng;
+
+            // Update marker to current Street View position
+            marker.setPosition(latLng);
+        }
+
+        panorama.setVisible(false);
 
         // Draw the path on the map
-        new google.maps.Polyline({
-            map,
-            path: streetViewPath.current,
-            strokeColor: "#FF0000",
-            strokeOpacity: 0.8,
-            strokeWeight: 4,
-        });
-
-        // Clear the path for next session
-        // streetViewPath.current = [];
+        if (streetViewPath.current.length > 0) {
+            new google.maps.Polyline({
+                map,
+                path: streetViewPath.current,
+                strokeColor: "#FF0000",
+                strokeOpacity: 0.8,
+                strokeWeight: 4,
+            });
+        }
     }
 
     useEffect(() => {
@@ -105,18 +123,25 @@ export default function Streetcrawl({ onExit }: StreetcrawlProps) {
             }
 
             const map = new window.google.maps.Map(mapElement, {
-            center: uoftCenter,
-            zoom: 16,
-            mapTypeControl: false,
-            streetViewControl: false,
-            fullscreenControl: false,
+                center: uoftCenter,
+                zoom: 16,
+                mapTypeControl: false,
+                streetViewControl: false,
+                fullscreenControl: false,
             });
-
             /*const marker = new window.google.maps.Marker({
                 position: bloorAndYonge,
                 map,
                 title: "Bloor & Yonge",
             });*/
+            // Initialize Street View panorama
+            const panoramaElement = document.getElementById("panorama");
+            if (panoramaElement) {
+                panoramaRef.current = new window.google.maps.StreetViewPanorama(panoramaElement, {
+                    position: uoftCenter,
+                    visible: false,
+                });
+            }
 
             const marker = new window.google.maps.Marker({
                 position: { lat: 43.6603, lng: -79.3839 },
@@ -124,9 +149,47 @@ export default function Streetcrawl({ onExit }: StreetcrawlProps) {
                 title: "Yonge and College",
             });
 
+            // Load persisted session if present
+            const session = loadSession();
+            if (session) {
+                if (session.center) map.setCenter(session.center);
+                if (session.zoom) map.setZoom(session.zoom);
+                if (session.markerPosition) marker.setPosition(session.markerPosition);
+                if (session.streetViewPath) streetViewPath.current = session.streetViewPath;
+
+                // Store last position so we can use it when entering Street View
+                if (session.streetViewPosition) {
+                    (mapRef as any).lastStreetViewPosition = session.streetViewPosition;
+                }
+            }
+
+            // Persist helper
+            const persist = () => {
+                const center = map.getCenter();
+                saveSession({
+                    center: center ? { lat: center.lat(), lng: center.lng() } : undefined,
+                    zoom: map.getZoom() ?? undefined,
+                    markerPosition: marker.getPosition()
+                        ? { lat: marker.getPosition()!.lat(), lng: marker.getPosition()!.lng() }
+                        : undefined,
+                    streetViewPath: streetViewPath.current.length ? streetViewPath.current : undefined,
+                });
+            };
+
+            // Save on relevant events and on unload
+            const centerListener = map.addListener("center_changed", () => persist());
+            const zoomListener = map.addListener("zoom_changed", () => persist());
+
+            window.addEventListener("beforeunload", persist);
+
+            // store refs
             mapRef.current = map;
             markerRef.current = marker;
-         };
+
+            // cleanup listeners when map is removed (handled in effect cleanup below)
+            // keep references so cleanup can remove them if needed
+            (mapRef.current as any).__svm_listeners = { centerListener, zoomListener };
+        };
 
         if (!existingScript) {
             const script = document.createElement("script");
@@ -145,14 +208,35 @@ export default function Streetcrawl({ onExit }: StreetcrawlProps) {
 
         return () => {
             if (mapRef.current) {
-            const pano = mapRef.current.getStreetView();
-            pano.setVisible(false);
-            window.google?.maps?.event?.clearInstanceListeners(pano);
-            window.google?.maps?.event?.clearInstanceListeners(mapRef.current);
+                const pano = mapRef.current.getStreetView();
+                pano.setVisible(false);
+                window.google?.maps?.event?.clearInstanceListeners(pano);
+                window.google?.maps?.event?.clearInstanceListeners(mapRef.current);
+
+                // remove added listeners and persist final state
+                const listeners = (mapRef.current as any).__svm_listeners;
+                if (listeners) {
+                    if (listeners.centerListener) listeners.centerListener.remove();
+                    if (listeners.zoomListener) listeners.zoomListener.remove();
+                }
             }
             if (markerRef.current) {
-            window.google?.maps?.event?.clearInstanceListeners(markerRef.current);
+                window.google?.maps?.event?.clearInstanceListeners(markerRef.current);
             }
+            // persist final session
+            if (mapRef.current) {
+                const center = mapRef.current.getCenter();
+                saveSession({
+                    center: center ? { lat: center.lat(), lng: center.lng() } : undefined,
+                    zoom: mapRef.current.getZoom() ?? undefined,
+                    markerPosition: markerRef.current && markerRef.current.getPosition()
+                        ? { lat: markerRef.current!.getPosition()!.lat(), lng: markerRef.current!.getPosition()!.lng() }
+                        : undefined,
+                    streetViewPath: streetViewPath.current.length ? streetViewPath.current : undefined,
+                });
+            }
+
+            window.removeEventListener("beforeunload", () => { });
             mapRef.current = null;
             markerRef.current = null;
         };
@@ -160,28 +244,32 @@ export default function Streetcrawl({ onExit }: StreetcrawlProps) {
 
     return (
         <div className="app-container">
-        <div className={`sidebar ${sidebarOpen ? "open" : "collapsed"}`}>
-            <button className="toggle-btn" onClick={() => setSidebarOpen(!sidebarOpen)}>
-            {sidebarOpen ? "Collapse" : "Expand"}
-            </button>
+            <div className={`sidebar ${sidebarOpen ? "open" : "collapsed"}`}>
+                <button className="toggle-btn" onClick={() => setSidebarOpen(!sidebarOpen)}>
+                    {sidebarOpen ? "Collapse" : "Expand"}
+                </button>
 
-            {sidebarOpen && (
-            <div className="sidebar-buttons">
-                <button>Roll Dice</button>
-                <button>Buy Property</button>
-                <button type="button" onClick={handleExit}>Main Menu</button>
-                <button type="button" onClick={enterStreetView}>Enter Street View</button>
-                <button type="button" onClick={handleStreetViewClose}>Exit Street View</button>
+                {sidebarOpen && (
+                    <div className="sidebar-buttons">
+                        <button>Roll Dice</button>
+                        <button>Buy Property</button>
+                        <button type="button" onClick={handleExit}>Main Menu</button>
+                        <button type="button" onClick={enterStreetView}>Enter Street View</button>
+                        <button type="button" onClick={handleStreetViewClose}>Exit Street View</button>
+                    </div>
+                )}
             </div>
-            )}
-        </div>
 
-        <div className="map-area">
-            <div
-            id="map"
-            style={{ width: "100%", height: "100%", borderRadius: "12px" }}
-            />
-        </div>
+            <div className="map-area">
+                <div
+                    id="map"
+                    style={{ width: "100%", height: "100%" }}
+                />
+                <div
+                    id="panorama"
+                    style={{ width: "100%", height: "100%", display: "none" }}
+                />
+            </div>
         </div>
     );
 }

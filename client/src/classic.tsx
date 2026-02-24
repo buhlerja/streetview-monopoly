@@ -11,7 +11,7 @@ export default function Classic({ onExit }: ClassicProps) {
   const handleExit = () => {
     const mapDiv = document.getElementById("map");
     if (mapDiv) {
-        mapDiv.innerHTML = "";
+      mapDiv.innerHTML = "";
     }
     onExit?.();
   };
@@ -34,16 +34,16 @@ export default function Classic({ onExit }: ClassicProps) {
       const mapElement = document.getElementById("map");
 
       if (!mapElement) {
-          console.error("Map element not found");
-          return;
+        console.error("Map element not found");
+        return;
       }
 
       const map = new window.google.maps.Map(mapElement, {
-      center: uoftCenter,
-      zoom: 16,
-      mapTypeControl: false,
-      streetViewControl: false,
-      fullscreenControl: false,
+        center: uoftCenter,
+        zoom: 16,
+        mapTypeControl: false,
+        streetViewControl: false,
+        fullscreenControl: false,
       });
 
       // Highlight a section of St. George St (approx segment: Bloor -> College)
@@ -210,7 +210,7 @@ export default function Classic({ onExit }: ClassicProps) {
 
   return (
     <div className="app-container">
-      
+
       {/* Sidebar */}
       <div className={`sidebar ${sidebarOpen ? "open" : "collapsed"}`}>
         <button className="toggle-btn" onClick={() => setSidebarOpen(!sidebarOpen)}>
