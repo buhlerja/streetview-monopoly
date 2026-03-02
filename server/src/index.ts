@@ -9,7 +9,6 @@ import gameRoutes from "./routes/game";
 const app = express();
 app.use(express.json());
 app.use(cors());
-app.use(express.json()); // for JSON POSTs if needed
 
 const httpServer = http.createServer(app);
 
@@ -29,11 +28,88 @@ export type GamePaths = Record<string, LatLngPoint[]>;
 // Keep track of active games and their players/paths in memory
 interface Game {
   code: string;
-  players: string[]; 
-  paths: GamePaths; 
+  players: string[];
+  paths: GamePaths;
+  mapOwnership?: Record<string, string[]>;
+  money?: Record<string, number>;
+  turnOrder?: string[];
+  currentTurn?: number;
 }
 
 const games: Record<string, Game> = {};
+
+// Load games from database on startup
+function loadGamesFromDatabase() {
+  try {
+    const rows = db.prepare("SELECT * FROM games").all() as any[];
+    rows.forEach(row => {
+      games[row.game_code] = {
+        code: row.game_code,
+        players: JSON.parse(row.players),
+        paths: JSON.parse(row.paths),
+        mapOwnership: row.map_ownership ? JSON.parse(row.map_ownership) : {},
+        money: row.money ? JSON.parse(row.money) : {},
+        turnOrder: row.turn_order ? JSON.parse(row.turn_order) : [],
+        currentTurn: row.current_turn || 0,
+      };
+    });
+    console.log(`Loaded ${rows.length} games from database`);
+  } catch (error) {
+    console.error("Failed to load games from database:", error);
+  }
+}
+
+// Save game to database
+function saveGameToDatabase(game: Game) {
+  try {
+    const stmt = db.prepare(`
+      INSERT INTO games (game_code, players, paths, map_ownership, money, turn_order, current_turn, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(game_code) DO UPDATE SET
+        players = excluded.players,
+        paths = excluded.paths,
+        map_ownership = excluded.map_ownership,
+        money = excluded.money,
+        turn_order = excluded.turn_order,
+        current_turn = excluded.current_turn,
+        updated_at = CURRENT_TIMESTAMP
+    `);
+
+    stmt.run(
+      game.code,
+      JSON.stringify(game.players),
+      JSON.stringify(game.paths),
+      game.mapOwnership ? JSON.stringify(game.mapOwnership) : null,
+      game.money ? JSON.stringify(game.money) : null,
+      game.turnOrder ? JSON.stringify(game.turnOrder) : null,
+      game.currentTurn || 0
+    );
+    console.log(`Game ${game.code} saved to database`);
+  } catch (error) {
+    console.error(`Failed to save game ${game.code}:`, error);
+  }
+}
+
+// Load a specific game from database
+function loadGameFromDatabase(code: string): Game | null {
+  try {
+    const row = db.prepare("SELECT * FROM games WHERE game_code = ?").get(code) as any;
+    if (!row) return null;
+
+    return {
+      code: row.game_code,
+      players: JSON.parse(row.players),
+      paths: JSON.parse(row.paths),
+      mapOwnership: row.map_ownership ? JSON.parse(row.map_ownership) : {},
+      money: row.money ? JSON.parse(row.money) : {},
+      turnOrder: row.turn_order ? JSON.parse(row.turn_order) : [],
+      currentTurn: row.current_turn || 0,
+    };
+  } catch (error) {
+    console.error(`Failed to load game ${code} from database:`, error);
+    return null;
+  }
+}
 
 io.on("connection", (socket) => {
   console.log("Client connected:", socket.id);
@@ -41,18 +117,29 @@ io.on("connection", (socket) => {
   // Client wants to create a new game
   socket.on("createGame", (callback: (code: string) => void) => {
     const code = generateGameCode();
-    games[code] = { code, players: [socket.id], paths: {} };
-    socket.join(code); // socket joins the room named by the code
+    const newGame: Game = { code, players: [socket.id], paths: {}, mapOwnership: {}, money: {}, turnOrder: [] };
+    games[code] = newGame;
+    saveGameToDatabase(newGame);
+    socket.join(code);
     console.log(`Game created: ${code} by ${socket.id}`);
-
-    callback(code); // send code back to client
+    callback(code);
   });
 
   // Client wants to join an existing game
   socket.on(
     "joinGame",
     (code: string, callback: (success: boolean, message?: string) => void) => {
-      const game = games[code];
+      let game: Game | undefined = games[code];
+
+      // If game not in memory, try loading from database
+      if (!game) {
+        const loadedGame = loadGameFromDatabase(code);
+        if (loadedGame) {
+          game = loadedGame;
+          games[code] = game; // Add back to memory
+        }
+      }
+
       if (!game) {
         callback(false, "Game not found");
         return;
@@ -64,33 +151,39 @@ io.on("connection", (socket) => {
       }
 
       game.players.push(socket.id);
+      saveGameToDatabase(game); // Persist changes
       socket.join(code);
       console.log(`${socket.id} joined game ${code}`);
 
       callback(true);
-      // Optionally, notify everyone in the room that a new player joined
+      // Notify everyone in the room that a new player joined, send current game state
       io.to(code).emit("playerJoined", { playerId: socket.id });
+      io.to(code).emit("gamePathsUpdate", game.paths);
     }
   );
 
   socket.on("updatePath", ({ gameCode, pathPoint }) => {
-    if (!games[gameCode]) return;
+    let game: Game | undefined = games[gameCode];
+    if (!game) {
+      const loadedGame = loadGameFromDatabase(gameCode);
+      if (!loadedGame) return;
+      game = loadedGame;
+      games[gameCode] = game;
+    }
 
-    games[gameCode].paths ??= {};
-    games[gameCode].paths[socket.id] ??= [];
-    games[gameCode].paths[socket.id].push({
+    game.paths ??= {};
+    game.paths[socket.id] ??= [];
+    game.paths[socket.id].push({
       lat: pathPoint.lat,
       lng: pathPoint.lng,
     });
 
-    io.to(gameCode).emit(
-      "gamePathsUpdate",
-      games[gameCode].paths // Broadcast to room (gameCode)
-    );
+    saveGameToDatabase(game);
+    io.to(gameCode).emit("gamePathsUpdate", game.paths);
   });
 
   socket.on("leaveGameRoom", (gameCode: string) => {
-    const game = games[gameCode];
+    let game = games[gameCode];
     if (!game) return;
 
     // Remove player from socket room
@@ -108,54 +201,31 @@ io.on("connection", (socket) => {
       delete game.paths[socket.id];
     }
 
-    // Notify remaining players
+    saveGameToDatabase(game); // Persist removal
     io.to(gameCode).emit("gamePathsUpdate", game.paths);
 
     console.log(`Player ${socket.id} left game ${gameCode}`);
   });
 
-  // Disconnect handling
   socket.on("disconnect", () => {
     console.log("Client disconnected:", socket.id);
-    // Remove player from any games
-    for (const code in games) {
-      const game = games[code];
-      game.players = game.players.filter((id) => id !== socket.id);
-      // If no players left, delete the game
-      if (game.players.length === 0) {
-        delete games[code];
-        console.log(`Game ${code} deleted (no players left)`);
-      }
-    }
   });
 });
 
 const PORT = 3001;
-httpServer.listen(PORT, () => {
-  console.log(`Server listening on port ${PORT}`);
-});
 
-<<<<<<< HEAD
-//initialize database
-db.prepare(`
-  CREATE TABLE IF NOT EXISTS games (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    game_code TEXT UNIQUE NOT NULL,
-    state TEXT NOT NULL,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  )
-`).run();
+// Load games from database on startup
+loadGamesFromDatabase();
 
-//Routes
+// Routes
 app.use("/game", gameRoutes);
 
-// //Start Server
-// httpServer.listen(PORT, () => {
-//   console.log(`Server listening on http://localhost:${PORT}`);
-// });
-=======
+// Start Server
+httpServer.listen(PORT, () => {
+  console.log(`Server listening on http://localhost:${PORT}`);
+});
+
 // Helper to generate 6-character game codes
 function generateGameCode(): string {
   return Math.random().toString(36).substring(2, 8).toUpperCase();
 }
->>>>>>> 86253a66ce14fef1a74a43e995ec44aabc31c413

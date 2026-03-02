@@ -40,3 +40,9 @@ dist-ssr
 .env*
 .env.local
 .env.*.local
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+server/data/

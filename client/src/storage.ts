@@ -8,15 +8,16 @@ export type Session = {
 
 const KEY = "svm_session";
 
+//Save session for refresh
 export function saveSession(session: Session) {
     try {
-        localStorage.setItem(KEY, JSON.stringify(session));
+        sessionStorage.setItem(KEY, JSON.stringify(session));
     } catch { }
 }
 
 export function loadSession(): Session | null {
     try {
-        const raw = localStorage.getItem(KEY);
+        const raw = sessionStorage.getItem(KEY);
         return raw ? JSON.parse(raw) as Session : null;
     } catch {
         return null;
@@ -24,26 +25,5 @@ export function loadSession(): Session | null {
 }
 
 export function clearSession() {
-    localStorage.removeItem(KEY);
-}
-
-export async function saveGameProgress(gameData: GameState) {
-    try {
-        await fetch("/api/game/save", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(gameData),
-        });
-    } catch (err) {
-        console.error("Failed to save to server", err);
-    }
-}
-
-export async function loadGameProgress(): Promise<GameState | null> {
-    try {
-        const res = await fetch("/api/game/load");
-        return res.ok ? res.json() : null;
-    } catch {
-        return null;
-    }
+    sessionStorage.removeItem(KEY);
 }

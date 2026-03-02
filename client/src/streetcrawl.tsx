@@ -1,17 +1,17 @@
 import { useState, useEffect, useRef } from "react";
-import { Socket } from "socket.io-client";
+import type { Socket } from "socket.io-client";
 import "./App.css";
 import { loadSession, saveSession } from "./storage";
 
 type StreetcrawlProps = {
-  gameCode: string;
-  socket?: Socket | null;
-  onExit?: () => void;
+    gameCode: string;
+    socket?: Socket | null;
+    onExit?: () => void;
 };
 
 interface LatLngPoint {
-  lat: number;
-  lng: number;
+    lat: number;
+    lng: number;
 }
 
 export type GamePaths = Record<string, LatLngPoint[]>;
@@ -25,7 +25,7 @@ export default function Streetcrawl({ gameCode, socket, onExit }: StreetcrawlPro
     const initializedRef = useRef(false);
 
     // State to store the path a user takes in Street View
-    //const streetViewPath = useRef<google.maps.LatLngLiteral[]>([]);
+    const streetViewPath = useRef<google.maps.LatLngLiteral[]>([]);
 
     const panoramaRef = useRef<google.maps.StreetViewPanorama | null>(null);
 
@@ -33,8 +33,10 @@ export default function Streetcrawl({ gameCode, socket, onExit }: StreetcrawlPro
         const map = mapRef.current;
         const marker = markerRef.current;
 
-        if (!map || !marker || !window.google?.maps) {
-            console.error("Missing refs:", { map, marker });
+        const googleAvailable = typeof window !== "undefined" && !!(window as any).google?.maps;
+
+        if (!map || !marker || !googleAvailable) {
+            console.error("Missing refs:", { map, marker, googleAvailable });
             return;
         }
 
@@ -44,8 +46,6 @@ export default function Streetcrawl({ gameCode, socket, onExit }: StreetcrawlPro
             console.error("No position found");
             return;
         }
-
-        console.log("Entering street view at:", position);
 
         const panorama = map.getStreetView();
         panorama.setPosition(position);
@@ -60,6 +60,14 @@ export default function Streetcrawl({ gameCode, socket, onExit }: StreetcrawlPro
 
                 // Store last position
                 (mapRef as any).lastStreetViewPosition = latLng;
+
+                // Emit position update to server so other players can see movement in real-time
+                if (socket) {
+                    socket.emit("updatePath", {
+                        gameCode,
+                        pathPoint: latLng,
+                    });
+                }
 
                 const center = map.getCenter();
                 saveSession({
@@ -101,14 +109,15 @@ export default function Streetcrawl({ gameCode, socket, onExit }: StreetcrawlPro
         // Draw the path on the map
         if (streetViewPath.current.length > 0) {
             // Commented out so that we can draw the path sent from the server.
-        // Rather than just our local path, we want to draw everyone's path in real time as they move in street view.
-        /*new google.maps.Polyline({
-                map,
-                path: streetViewPath.current,
-                strokeColor: "#FF0000",
-                strokeOpacity: 0.8,
-                strokeWeight: 4,
-            });*/
+            // Rather than just our local path, we want to draw everyone's path in real time as they move in street view.
+            // new google.maps.Polyline({
+            //         map,
+            //         path: streetViewPath.current,
+            //         strokeColor: "#FF0000",
+            //         strokeOpacity: 0.8,
+            //         strokeWeight: 4,
+            //     });
+
         }
     }
 
@@ -117,12 +126,14 @@ export default function Streetcrawl({ gameCode, socket, onExit }: StreetcrawlPro
     useEffect(() => {
         if (!mapRef.current) return;
 
-        Object.values(allPaths).forEach(path => {
-            new google.maps.Polyline({
-                map: mapRef.current!,
-                path,
-                strokeWeight: 3
-            });
+        Object.entries(allPaths).forEach(([, path]) => {
+            if (path.length > 0) {
+                new google.maps.Polyline({
+                    map: mapRef.current!,
+                    path,
+                    strokeWeight: 3
+                });
+            }
         });
     }, [allPaths]);
 
@@ -132,7 +143,6 @@ export default function Streetcrawl({ gameCode, socket, onExit }: StreetcrawlPro
 
         //socket.emit("joinGame", gameCode); // When component mounts, join the specific game room for path updates
         // Already joined the room in App.tsx, so no need to join again here. Just need to listen for updates.
-
         socket.on("gamePathsUpdate", (paths: GamePaths) => {
             setAllPaths(paths);
         });
@@ -153,8 +163,9 @@ export default function Streetcrawl({ gameCode, socket, onExit }: StreetcrawlPro
 
         const initializeMap = () => {
             if (initializedRef.current) return;
-            initializedRef.current = true;
             if (!(window.google && window.google.maps)) return;
+
+            initializedRef.current = true;
 
             const uoftCenter = { lat: 43.6629, lng: -79.3957 };
             //const bloorAndYonge = { lat: 43.6706, lng: -79.3865 };
@@ -173,6 +184,7 @@ export default function Streetcrawl({ gameCode, socket, onExit }: StreetcrawlPro
                 streetViewControl: false,
                 fullscreenControl: false,
             });
+
             /*const marker = new window.google.maps.Marker({
                 position: bloorAndYonge,
                 map,
@@ -242,12 +254,10 @@ export default function Streetcrawl({ gameCode, socket, onExit }: StreetcrawlPro
             script.onload = initializeMap;
             script.onerror = () => console.error("Failed to load Google Maps script");
             document.body.appendChild(script);
+        } else if (window.google && window.google.maps) {
+            initializeMap();
         } else {
-            if (window.google && window.google.maps) {
-                initializeMap();
-            } else {
-                existingScript.addEventListener("load", initializeMap);
-            }
+            existingScript.addEventListener("load", initializeMap);
         }
 
         return () => {
@@ -293,17 +303,17 @@ export default function Streetcrawl({ gameCode, socket, onExit }: StreetcrawlPro
                     {sidebarOpen ? "Collapse" : "Expand"}
                 </button>
 
-            {sidebarOpen && (
-            <div className="sidebar-buttons">
-                <h2>Game Code: {gameCode}</h2>
-                <button>Roll Dice</button>
-                <button>Buy Property</button>
-                <button type="button" onClick={handleExit}>Main Menu</button>
-                <button type="button" onClick={enterStreetView}>Enter Street View</button>
-                <button type="button" onClick={handleStreetViewClose}>Exit Street View</button>
+                {sidebarOpen && (
+                    <div className="sidebar-buttons">
+                        <h2>Game Code: {gameCode}</h2>
+                        <button>Roll Dice</button>
+                        <button>Buy Property</button>
+                        <button type="button" onClick={handleExit}>Main Menu</button>
+                        <button type="button" onClick={enterStreetView}>Enter Street View</button>
+                        <button type="button" onClick={handleStreetViewClose}>Exit Street View</button>
+                    </div>
+                )}
             </div>
-            )}
-        </div>
 
             <div className="map-area">
                 <div
