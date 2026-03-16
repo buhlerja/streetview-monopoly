@@ -19,6 +19,9 @@ export type GamePaths = Record<string, LatLngPoint[]>;
 export default function Streetcrawl({ gameCode, socket, onExit }: StreetcrawlProps) {
     const [sidebarOpen, setSidebarOpen] = useState(true);
     const [allPaths, setAllPaths] = useState<Record<string, google.maps.LatLngLiteral[]>>({});
+    const [isMyTurn, setIsMyTurn] = useState(false);
+    const [currentPlayer, setCurrentPlayer] = useState<string | null>(null);
+    const [hasMoved, setHasMoved] = useState(false);
 
     const mapRef = useRef<google.maps.Map | null>(null);
     const markerRef = useRef<google.maps.Marker | null>(null);
@@ -30,6 +33,9 @@ export default function Streetcrawl({ gameCode, socket, onExit }: StreetcrawlPro
     const panoramaRef = useRef<google.maps.StreetViewPanorama | null>(null);
 
     const enterStreetView = (): void => {
+        if (!isMyTurn) return;// only allow entering Street View on your turn
+        if (hasMoved)  return;//alredy moved in Street View this turn, prevent re-entry until next turn
+
         const map = mapRef.current;
         const marker = markerRef.current;
 
@@ -60,6 +66,9 @@ export default function Streetcrawl({ gameCode, socket, onExit }: StreetcrawlPro
 
                 // Store last position
                 (mapRef as any).lastStreetViewPosition = latLng;
+
+                if (hasMoved) return;// already moved, no need to emit again until next turn
+                setHasMoved(true); // mark that we've moved at least once this turn
 
                 // Emit position update to server so other players can see movement in real-time
                 if (socket) {
@@ -121,6 +130,16 @@ export default function Streetcrawl({ gameCode, socket, onExit }: StreetcrawlPro
         }
     }
 
+    const handleEndTurn = () => {
+        if (!socket) return;
+
+        socket.emit("endTurn", gameCode,(success: boolean, message?: string) => {
+            if (!success) {
+                alert(message || "Failed to end turn");
+            }
+        });
+    };
+
     // Use effect for drawing path updates from the server
     // Since we never clear previous polylines performance might degrade. Want to look into a more efficient way
     useEffect(() => {
@@ -152,6 +171,22 @@ export default function Streetcrawl({ gameCode, socket, onExit }: StreetcrawlPro
             socket.off("gamePathsUpdate");
         };
     }, [socket, gameCode]);
+
+    useEffect(() => {
+        if (!socket) return;
+        socket.on("gameState", ({currentPlayerId}) => {
+            setCurrentPlayer(currentPlayerId);
+            const myTurn = currentPlayerId === socket.id;
+            setIsMyTurn(myTurn);
+            if (!myTurn) {
+                setHasMoved(false); // reset move state when it's not your turn
+            }
+        });
+        return () => {
+            socket.off("gameState");
+        };
+    }, [socket]);
+
 
     useEffect(() => {
         const apiKey = import.meta.env.VITE_API_KEY;
@@ -306,11 +341,15 @@ export default function Streetcrawl({ gameCode, socket, onExit }: StreetcrawlPro
                 {sidebarOpen && (
                     <div className="sidebar-buttons">
                         <h2>Game Code: {gameCode}</h2>
-                        <button>Roll Dice</button>
+                        <p>{isMyTurn ? "It's your turn!" : "Waiting for other players..."}</p>
+                        <p>Current Player: {currentPlayer ??"-"}</p>
+                        <p>{hasMoved ? "You've already moved in Street View this turn." : "You can enter Street View to move."}</p>
+                        <button disabled={!isMyTurn || hasMoved}>Roll Dice</button>
                         <button>Buy Property</button>
                         <button type="button" onClick={handleExit}>Main Menu</button>
-                        <button type="button" onClick={enterStreetView}>Enter Street View</button>
+                        <button type="button" onClick={enterStreetView}disabled={!isMyTurn || hasMoved}>Enter Street View</button>
                         <button type="button" onClick={handleStreetViewClose}>Exit Street View</button>
+                        <button type="button" onClick={handleEndTurn} disabled={!isMyTurn}>End Turn</button>
                     </div>
                 )}
             </div>

@@ -82,7 +82,7 @@ function saveGameToDatabase(game: Game) {
       game.mapOwnership ? JSON.stringify(game.mapOwnership) : null,
       game.money ? JSON.stringify(game.money) : null,
       game.turnOrder ? JSON.stringify(game.turnOrder) : null,
-      game.currentTurn || 0
+      game.currentTurn ?? 0
     );
     console.log(`Game ${game.code} saved to database`);
   } catch (error) {
@@ -117,7 +117,7 @@ io.on("connection", (socket) => {
   // Client wants to create a new game
   socket.on("createGame", (callback: (code: string) => void) => {
     const code = generateGameCode();
-    const newGame: Game = { code, players: [socket.id], paths: {}, mapOwnership: {}, money: {}, turnOrder: [] };
+    const newGame: Game = { code, players: [socket.id], paths: {}, mapOwnership: {}, money: {}, turnOrder: [socket.id], currentTurn: 0 };
     games[code] = newGame;
     saveGameToDatabase(newGame);
     socket.join(code);
@@ -145,12 +145,14 @@ io.on("connection", (socket) => {
         return;
       }
 
-      if (game.players.length >= 2) {
+      if (game.players.length >= 2) {//I think the game is 2-6 players, so we should change this to 6
         callback(false, "Game is full");
         return;
       }
 
       game.players.push(socket.id);
+      game.turnOrder ??= [];
+      game.turnOrder.push(socket.id);
       saveGameToDatabase(game); // Persist changes
       socket.join(code);
       console.log(`${socket.id} joined game ${code}`);
@@ -162,15 +164,55 @@ io.on("connection", (socket) => {
     }
   );
 
-  socket.on("updatePath", ({ gameCode, pathPoint }) => {
+  socket.on("endTurn",
+    (code: string, callback: (success: boolean, message?: string) => void) => {
+      let game: Game | undefined = games[code];
+      if (!game) {
+        const loadedGame = loadGameFromDatabase(code);
+        if (!loadedGame) {
+          callback?.(false, "Game not found");// If game not found, we can't end the turn, so we should callback with failure
+          return;
+        }
+        game = loadedGame;
+        games[code] = game;
+      }
+      game.turnOrder ??= [];
+      game.currentTurn ??= 0;
+      
+      if (game.turnOrder.length === 0) {
+        callback?.(false, "No players in game");
+        return;// If there are no players, we can't end the turn, so we should callback with failure
+      }
+      const currentPlayerId = game.turnOrder[game.currentTurn];
+      if (socket.id !== currentPlayerId) {
+        callback?.(false, "Not your turn");
+        return;// If it's not the player's turn, we can't end the turn, so we should callback with failure
+      }
+      game.currentTurn = (game.currentTurn + 1) % game.turnOrder.length;// Move to next player's turn
+      saveGameToDatabase(game);
+      io.to(code).emit("gameState", { code: game.code,
+                                      players: game.players,
+                                      currentTurn: game.currentTurn,
+                                      currentPlayerId: game.turnOrder[game.currentTurn]?? null, });// Notify everyone in the room about the new turn
+      callback?.(true);
+    }
+  );
+
+
+  socket.on("updatePath", ({gameCode,pathPoint})=>{
     let game: Game | undefined = games[gameCode];
     if (!game) {
       const loadedGame = loadGameFromDatabase(gameCode);
-      if (!loadedGame) return;
+      if (!loadedGame)return;
       game = loadedGame;
       games[gameCode] = game;
     }
-
+    game.players ??= [];
+    game.currentTurn ??= 0; 
+    const currentPlayerId = game.turnOrder ![game.currentTurn];
+    if (socket.id !== currentPlayerId) {
+      return;// If it's not the player's turn, we shouldn't update paths
+    }   
     game.paths ??= {};
     game.paths[socket.id] ??= [];
     game.paths[socket.id].push({
