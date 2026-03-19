@@ -145,7 +145,7 @@ io.on("connection", (socket) => {
         return;
       }
 
-      if (game.players.length >= 2) {//I think the game is 2-6 players, so we should change this to 6
+      if (game.players.length >= 3) { // Changing to 3 at the moment for debug
         callback(false, "Game is full");
         return;
       }
@@ -161,6 +161,10 @@ io.on("connection", (socket) => {
       // Notify everyone in the room that a new player joined, send current game state
       io.to(code).emit("playerJoined", { playerId: socket.id });
       io.to(code).emit("gamePathsUpdate", game.paths);
+      io.to(code).emit("gameState", { code: game.code, // ADDING LOGIC TO DO THIS AT GAME BOOT SO THAT THE FIRST PLAYER IS CHOSEN
+                                      players: game.players,
+                                      currentTurn: game.currentTurn,
+                                      currentPlayerId: game.turnOrder![game.currentTurn ?? 0] ?? null, });
     }
   );
 

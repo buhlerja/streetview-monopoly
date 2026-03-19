@@ -220,11 +220,6 @@ export default function Streetcrawl({ gameCode, socket, onExit }: StreetcrawlPro
                 fullscreenControl: false,
             });
 
-            /*const marker = new window.google.maps.Marker({
-                position: bloorAndYonge,
-                map,
-                title: "Bloor & Yonge",
-            });*/
             // Initialize Street View panorama
             const panoramaElement = document.getElementById("panorama");
             if (panoramaElement) {
