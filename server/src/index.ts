@@ -18,17 +18,35 @@ const io = new Server(httpServer, {
   }
 });
 
+const COLORS = [
+  "#e6194b", // red
+  "#3cb44b", // green
+  "#4363d8", // blue
+  "#f58231", // orange
+  "#911eb4", // purple
+  "#46f0f0", // cyan
+  "#f032e6", // magenta
+  "#bcf60c", // lime
+  "#fabebe", // pink
+  "#008080", // teal
+];
+
 interface LatLngPoint {
   lat: number;
   lng: number;
 }
 
+export type Player = {
+  id: string;
+  colour: string;
+  name: string;
+};
 export type GamePaths = Record<string, LatLngPoint[]>;
 
 // Keep track of active games and their players/paths in memory
 interface Game {
   code: string;
-  players: string[];
+  players: Player[];
   paths: GamePaths;
   mapOwnership?: Record<string, string[]>;
   money?: Record<string, number>;
@@ -37,6 +55,11 @@ interface Game {
 }
 
 const games: Record<string, Game> = {};
+
+// Assign new players a colour based on their index in the players array, cycling through the COLORS array
+function assignColor(playerIndex: number): string {
+  return COLORS[playerIndex % COLORS.length];
+}
 
 // Load games from database on startup
 function loadGamesFromDatabase() {
@@ -117,7 +140,8 @@ io.on("connection", (socket) => {
   // Client wants to create a new game
   socket.on("createGame", (callback: (code: string) => void) => {
     const code = generateGameCode();
-    const newGame: Game = { code, players: [socket.id], paths: {}, mapOwnership: {}, money: {}, turnOrder: [socket.id], currentTurn: 0 };
+    const player : Player = { id: socket.id, colour: assignColor(0), name: socket.id }; // For now, use socket.id as player name. Add in logic to enter later
+    const newGame: Game = { code, players: [player], paths: {}, mapOwnership: {}, money: {}, turnOrder: [player.id], currentTurn: 0 };
     games[code] = newGame;
     saveGameToDatabase(newGame);
     socket.join(code);
@@ -149,18 +173,21 @@ io.on("connection", (socket) => {
         callback(false, "Game is full");
         return;
       }
-
-      game.players.push(socket.id);
+      const player : Player = { id: socket.id, colour: assignColor(game.players.length), name: socket.id }; // For now, use socket.id as player name. Add in logic to enter later
+      game.players.push(player);
       game.turnOrder ??= [];
-      game.turnOrder.push(socket.id);
+      game.turnOrder.push(player.id);
       saveGameToDatabase(game); // Persist changes
       socket.join(code);
-      console.log(`${socket.id} joined game ${code}`);
+      console.log(`${player.id} joined game ${code}`);
 
       callback(true);
       // Notify everyone in the room that a new player joined, send current game state
-      io.to(code).emit("playerJoined", { playerId: socket.id });
-      io.to(code).emit("gamePathsUpdate", game.paths);
+      io.to(code).emit("playerJoined", { playerId: player.id });
+      io.to(code).emit("gamePathsUpdate", {
+        paths: game.paths,
+        players: game.players,
+      });
       io.to(code).emit("gameState", { code: game.code, // ADDING LOGIC TO DO THIS AT GAME BOOT SO THAT THE FIRST PLAYER IS CHOSEN
                                       players: game.players,
                                       currentTurn: game.currentTurn,
@@ -225,7 +252,10 @@ io.on("connection", (socket) => {
     });
 
     saveGameToDatabase(game);
-    io.to(gameCode).emit("gamePathsUpdate", game.paths);
+    io.to(gameCode).emit("gamePathsUpdate", {
+      paths: game.paths,
+      players: game.players,
+    });
   });
 
   socket.on("leaveGameRoom", (gameCode: string) => {
@@ -238,7 +268,7 @@ io.on("connection", (socket) => {
     // Remove player from game state
     if (game.players) {
       game.players = game.players.filter(
-        player => player !== socket.id
+        player => player.id !== socket.id
       );
     }
 
@@ -248,7 +278,10 @@ io.on("connection", (socket) => {
     }
 
     saveGameToDatabase(game); // Persist removal
-    io.to(gameCode).emit("gamePathsUpdate", game.paths);
+    io.to(gameCode).emit("gamePathsUpdate", {
+      paths: game.paths,
+      players: game.players,
+    });
 
     console.log(`Player ${socket.id} left game ${gameCode}`);
   });

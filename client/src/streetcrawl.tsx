@@ -15,10 +15,22 @@ interface LatLngPoint {
 }
 
 export type GamePaths = Record<string, LatLngPoint[]>;
+export type Player = {
+  id: string;
+  colour: string;
+  name: string;
+};
 
 export default function Streetcrawl({ gameCode, socket, onExit }: StreetcrawlProps) {
     const [sidebarOpen, setSidebarOpen] = useState(true);
-    const [allPaths, setAllPaths] = useState<Record<string, google.maps.LatLngLiteral[]>>({});
+    //const [allPaths, setAllPaths] = useState<Record<string, google.maps.LatLngLiteral[]>>({});
+    const [allPaths, setAllPaths] = useState<{
+        paths: Record<string, google.maps.LatLngLiteral[]>;
+        players: Player[];
+    }>({
+        paths: {},
+        players: []
+    });
     const [isMyTurn, setIsMyTurn] = useState(false);
     const [currentPlayer, setCurrentPlayer] = useState<string | null>(null);
     const [hasMoved, setHasMoved] = useState(false);
@@ -116,7 +128,7 @@ export default function Streetcrawl({ gameCode, socket, onExit }: StreetcrawlPro
         panorama.setVisible(false);
 
         // Draw the path on the map
-        if (streetViewPath.current.length > 0) {
+        /*if (streetViewPath.current.length > 0) {
             // Commented out so that we can draw the path sent from the server.
             // Rather than just our local path, we want to draw everyone's path in real time as they move in street view.
             // new google.maps.Polyline({
@@ -127,7 +139,7 @@ export default function Streetcrawl({ gameCode, socket, onExit }: StreetcrawlPro
             //         strokeWeight: 4,
             //     });
 
-        }
+        }*/
     }
 
     const handleEndTurn = () => {
@@ -144,13 +156,16 @@ export default function Streetcrawl({ gameCode, socket, onExit }: StreetcrawlPro
     // Since we never clear previous polylines performance might degrade. Want to look into a more efficient way
     useEffect(() => {
         if (!mapRef.current) return;
-
-        Object.entries(allPaths).forEach(([, path]) => {
-            if (path.length > 0) {
+        
+        // Iterate over each player
+        allPaths.players.forEach(player => {
+            const path = allPaths.paths[player.id]; // use player.id to get path
+            if (path && path.length > 0) {
                 new google.maps.Polyline({
                     map: mapRef.current!,
                     path,
-                    strokeWeight: 3
+                    strokeWeight: 3,
+                    strokeColor: player.colour // color comes directly from player
                 });
             }
         });
@@ -162,8 +177,8 @@ export default function Streetcrawl({ gameCode, socket, onExit }: StreetcrawlPro
 
         //socket.emit("joinGame", gameCode); // When component mounts, join the specific game room for path updates
         // Already joined the room in App.tsx, so no need to join again here. Just need to listen for updates.
-        socket.on("gamePathsUpdate", (paths: GamePaths) => {
-            setAllPaths(paths);
+        socket.on("gamePathsUpdate", ({ paths, players }: { paths: GamePaths; players: Player[] }) => {
+            setAllPaths({paths, players});
         });
 
         return () => {
