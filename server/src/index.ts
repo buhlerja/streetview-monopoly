@@ -113,6 +113,16 @@ function saveGameToDatabase(game: Game) {
   }
 }
 
+// Delete game from database
+function deleteGameFromDatabase(code: string) {
+  try {
+    db.prepare("DELETE FROM games WHERE game_code = ?").run(code);
+    console.log(`Game ${code} deleted from database`);
+  } catch (error) {
+    console.error(`Failed to delete game ${code}:`, error);
+  }
+}
+
 // Load a specific game from database
 function loadGameFromDatabase(code: string): Game | null {
   try {
@@ -277,17 +287,54 @@ io.on("connection", (socket) => {
       delete game.paths[socket.id];
     }
 
-    saveGameToDatabase(game); // Persist removal
-    io.to(gameCode).emit("gamePathsUpdate", {
-      paths: game.paths,
-      players: game.players,
-    });
+    // If no players left, delete the game
+    if (game.players.length === 0) {
+      deleteGameFromDatabase(gameCode);
+      delete games[gameCode];
+      console.log(`Game ${gameCode} deleted (all players left)`);
+    } else {
+      saveGameToDatabase(game); // Persist removal
+      io.to(gameCode).emit("gamePathsUpdate", {
+        paths: game.paths,
+        players: game.players,
+      });
+    }
 
     console.log(`Player ${socket.id} left game ${gameCode}`);
   });
 
   socket.on("disconnect", () => {
     console.log("Client disconnected:", socket.id);
+    
+    // Remove disconnected player from all games they were in
+    Object.keys(games).forEach(gameCode => {
+      const game = games[gameCode];
+      
+      // Check if player was in this game
+      const playerWasInGame = game.players.some(p => p.id === socket.id);
+      if (!playerWasInGame) return;
+      
+      // Remove player from game
+      game.players = game.players.filter(p => p.id !== socket.id);
+      
+      // Remove player's path
+      if (game.paths) {
+        delete game.paths[socket.id];
+      }
+      
+      // If no players left, delete the game
+      if (game.players.length === 0) {
+        deleteGameFromDatabase(gameCode);
+        delete games[gameCode];
+        console.log(`Game ${gameCode} deleted (player disconnected, no players left)`);
+      } else {
+        saveGameToDatabase(game);
+        io.to(gameCode).emit("gamePathsUpdate", {
+          paths: game.paths,
+          players: game.players,
+        });
+      }
+    });
   });
 });
 

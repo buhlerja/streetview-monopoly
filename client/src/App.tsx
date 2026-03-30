@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import "./App.css";
 import { io, Socket } from "socket.io-client";
 import Streetcrawl from "./streetcrawl";
+import { saveGameCode, loadGameCode, clearGameCode } from "./storage";
 
 //let socket: Socket;
 
@@ -13,6 +14,7 @@ export default function App() {
   const [gameCode, setGameCode] = useState("");
   const [joinCode, setJoinCode] = useState("");
   const [connected, setConnected] = useState(false);
+  const [savedGameCode, setSavedGameCode] = useState<string | null>(null);
 
   /* ---------------- Connect to server on app boot ---------------- */
   useEffect(() => {
@@ -39,6 +41,12 @@ export default function App() {
       socket.off("playerJoined", handlePlayerJoined); // use socket
       socket.disconnect(); // use socket
     };
+  }, []);
+
+  /* ---------------- Load saved game on mount ---------------- */
+  useEffect(() => {
+    const saved = loadGameCode();
+    setSavedGameCode(saved);
   }, []);
 
   /* ---------------- New Game Screen ---------------- */
@@ -92,6 +100,7 @@ export default function App() {
               (success: boolean, message?: string) => {
                 if (success) {
                   setGameCode(joinCode);
+                  saveGameCode(joinCode);
                   setScreen("streetcrawl");
                 } else {
                   alert(message || "Could not join game");
@@ -116,7 +125,7 @@ export default function App() {
       <Streetcrawl
         gameCode={gameCode}
         socket={socketRef.current}
-        onExit={() => setScreen("menu")} 
+        onExit={() => setScreen("menu")}
       />
     );
   }
@@ -127,6 +136,28 @@ export default function App() {
       <h1>StreetView Monopoly</h1>
 
       <div className="menu-buttons">
+        {savedGameCode && (
+          <>
+            <button
+              onClick={() => {
+                setGameCode(savedGameCode);
+                setScreen("streetcrawl");
+              }}
+            >
+              Resume Game ({savedGameCode})
+            </button>
+
+            <button
+              onClick={() => {
+                clearGameCode();
+                setSavedGameCode(null);
+              }}
+            >
+              Start Fresh
+            </button>
+          </>
+        )}
+
         <button
           onClick={() => {
             const socket = socketRef.current;
@@ -134,6 +165,7 @@ export default function App() {
 
             socket.emit("createGame", (code: string) => {
               setGameCode(code);
+              saveGameCode(code);
               setScreen("new");
             });
           }}
